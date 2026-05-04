@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Triangle Scanner v3 FIXED</title>
+</head>
+<body style="background:#0b0f18;color:#e6f0ff;font-family:monospace;padding:20px">
+
+<h2>🚀 Triangle Scanner v3 (Fixed)</h2>
+<button onclick="startScan()">SCAN TEST</button>
+<pre id="log"></pre>
+
+<script>
+
+// ================= FIX CORE =================
+function fetchWithTimeout(url, timeout = 10000) {
+  const controller = new AbortController();
+  const id = setTimeout(() => controller.abort(), timeout);
+
+  return fetch(url, { signal: controller.signal })
+    .finally(() => clearTimeout(id));
+}
+
+// retry wrapper
+async function fetchRetry(url, tries = 2) {
+  for (let i = 0; i < tries; i++) {
+    try {
+      return await fetchWithTimeout(url, 8000);
+    } catch (e) {
+      if (i === tries - 1) throw e;
+    }
+  }
+}
+
+// ================= FETCH =================
+async function fetchKlines(sym) {
+  const url = https://fapi.binance.com/fapi/v1/klines?symbol=${sym}&interval=30m&limit=200;
+
+  try {
+    const r = await fetchRetry(url);
+    return await r.json();
+  } catch {
+    // fallback spot
+    const r2 = await fetchRetry(
+      https://api.binance.com/api/v3/klines?symbol=${sym}&interval=30m&limit=200
+    );
+    return await r2.json();
+  }
+}
+
+// ================= SIMPLE TRIANGLE DETECT =================
+function detectTriangle(data) {
+  if (!data || data.length < 50) return false;
+
+  let highs = data.map(c => parseFloat(c[2]));
+  let lows  = data.map(c => parseFloat(c[3]));
+
+  // simple condition
+  let h1 = highs.slice(-20, -10);
+  let h2 = highs.slice(-10);
+
+  let l1 = lows.slice(-20, -10);
+  let l2 = lows.slice(-10);
+
+  let max1 = Math.max(...h1);
+  let max2 = Math.max(...h2);
+
+  let min1 = Math.min(...l1);
+  let min2 = Math.min(...l2);
+
+  return (max2 < max1) && (min2 > min1);
+}
+
+// ================= MAIN =================
+async function startScan() {
+  const log = document.getElementById("log");
+  log.textContent = "Scanning...\n";
+
+  const symbols = ["BTCUSDT","ETHUSDT","SOLUSDT","BNBUSDT","XRPUSDT"];
+
+  for (let sym of symbols) {
+    try {
+      const data = await fetchKlines(sym);
+
+      if (detectTriangle(data)) {
+        log.textContent += ✅ ${sym} triangle\n;
+      } else {
+        log.textContent += — ${sym}\n;
+      }
+
+    } catch (e) {
+      log.textContent += ❌ ${sym} error\n;
+    }
+  }
+
+  log.textContent += "\nDone.";
+}
+
+</script>
+
+</body>
+</html>
