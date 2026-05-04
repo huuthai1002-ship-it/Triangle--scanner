@@ -2,99 +2,132 @@
 <html lang="vi">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Triangle Scanner v3 FIXED</title>
+<title>Triangle Scanner AUTO</title>
+<style>
+body{background:#0b0f18;color:#e6f0ff;font-family:monospace;padding:20px}
+button{padding:10px 16px;margin:10px 0;cursor:pointer}
+#log{white-space:pre-wrap;margin-top:10px;font-size:13px}
+</style>
 </head>
-<body style="background:#0b0f18;color:#e6f0ff;font-family:monospace;padding:20px">
+<body>
 
-<h2>🚀 Triangle Scanner v3 (Fixed)</h2>
-<button onclick="startScan()">SCAN TEST</button>
+<h2>🚀 Triangle Scanner AUTO (200+ coin)</h2>
+
+<button onclick="startScan()">▶ SCAN ALL FUTURES</button>
+
 <pre id="log"></pre>
 
 <script>
 
-// ================= FIX CORE =================
-function fetchWithTimeout(url, timeout = 10000) {
-  const controller = new AbortController();
-  const id = setTimeout(() => controller.abort(), timeout);
+// ===== LOAD ALL FUTURES =====
+async function loadSymbols(){
+  const res = await fetch("https://fapi.binance.com/fapi/v1/exchangeInfo");
+  const data = await res.json();
 
-  return fetch(url, { signal: controller.signal })
-    .finally(() => clearTimeout(id));
+  return data.symbols
+    .filter(s => s.quoteAsset === "USDT" && s.contractType === "PERPETUAL")
+    .map(s => s.symbol);
 }
 
-// retry wrapper
-async function fetchRetry(url, tries = 2) {
-  for (let i = 0; i < tries; i++) {
-    try {
-      return await fetchWithTimeout(url, 8000);
-    } catch (e) {
-      if (i === tries - 1) throw e;
+// ===== FETCH =====
+async function fetchKlines(symbol){
+  const url = `https://fapi.binance.com/fapi/v1/klines?symbol=${symbol}&interval=30m&limit=400`;
+  const res = await fetch(url);
+  if(!res.ok) throw new Error(symbol);
+  return await res.json();
+}
+
+// ===== PIVOT =====
+function pivotHighs(d,l){
+  let a=[];
+  for(let i=l;i<d.length-l;i++){
+    let ok=true;
+    for(let j=i-l;j<=i+l;j++){
+      if(j!=i && d[j]>=d[i]) ok=false;
     }
+    if(ok) a.push({i,val:d[i]});
   }
+  return a;
 }
-
-// ================= FETCH =================
-async function fetchKlines(sym) {
-  const url = https://fapi.binance.com/fapi/v1/klines?symbol=${sym}&interval=30m&limit=200;
-
-  try {
-    const r = await fetchRetry(url);
-    return await r.json();
-  } catch {
-    // fallback spot
-    const r2 = await fetchRetry(
-      https://api.binance.com/api/v3/klines?symbol=${sym}&interval=30m&limit=200
-    );
-    return await r2.json();
+function pivotLows(d,l){
+  let a=[];
+  for(let i=l;i<d.length-l;i++){
+    let ok=true;
+    for(let j=i-l;j<=i+l;j++){
+      if(j!=i && d[j]<=d[i]) ok=false;
+    }
+    if(ok) a.push({i,val:d[i]});
   }
+  return a;
 }
 
-// ================= SIMPLE TRIANGLE DETECT =================
-function detectTriangle(data) {
-  if (!data || data.length < 50) return false;
-
-  let highs = data.map(c => parseFloat(c[2]));
-  let lows  = data.map(c => parseFloat(c[3]));
-
-  // simple condition
-  let h1 = highs.slice(-20, -10);
-  let h2 = highs.slice(-10);
-
-  let l1 = lows.slice(-20, -10);
-  let l2 = lows.slice(-10);
-
-  let max1 = Math.max(...h1);
-  let max2 = Math.max(...h2);
-
-  let min1 = Math.min(...l1);
-  let min2 = Math.min(...l2);
-
-  return (max2 < max1) && (min2 > min1);
+// ===== REG =====
+function reg(p){
+  let n=p.length,sx=0,sy=0,sxy=0,sx2=0;
+  p.forEach(x=>{
+    sx+=x.i; sy+=x.val; sxy+=x.i*x.val; sx2+=x.i*x.i;
+  });
+  return (n*sxy-sx*sy)/(n*sx2-sx*sx);
 }
 
-// ================= MAIN =================
-async function startScan() {
+// ===== DETECT =====
+function detect(k){
+  const h=k.map(x=>+x[2]);
+  const l=k.map(x=>+x[3]);
+
+  const pH=pivotHighs(h,4);
+  const pL=pivotLows(l,4);
+
+  if(pH.length<2||pL.length<2) return false;
+
+  const sH=reg(pH);
+  const sL=reg(pL);
+
+  return sH<0 && sL>0;
+}
+
+// ===== MAIN =====
+async function startScan(){
   const log = document.getElementById("log");
-  log.textContent = "Scanning...\n";
+  log.textContent="⏳ Loading symbols...\n";
 
-  const symbols = ["BTCUSDT","ETHUSDT","SOLUSDT","BNBUSDT","XRPUSDT"];
+  let symbols;
+  try{
+    symbols = await loadSymbols();
+  }catch{
+    log.textContent+="⚠ API bị chặn → dùng fallback list\n";
+    symbols = ["BTCUSDT","ETHUSDT","SOLUSDT","XRPUSDT","ADAUSDT","DOGEUSDT"];
+  }
 
-  for (let sym of symbols) {
-    try {
+  log.textContent += `🚀 Scan ${symbols.length} coins\n`;
+
+  let found=0;
+
+  for(let i=0;i<symbols.length;i++){
+    const sym = symbols[i];
+
+    try{
       const data = await fetchKlines(sym);
+      const slice = data.slice(-336); // 3–7 ngày
 
-      if (detectTriangle(data)) {
-        log.textContent += ✅ ${sym} triangle\n;
-      } else {
-        log.textContent += — ${sym}\n;
+      if(detect(slice)){
+        found++;
+        log.textContent += `✅ ${sym}\n`;
       }
 
-    } catch (e) {
-      log.textContent += ❌ ${sym} error\n;
+    }catch{
+      log.textContent += `⚠ ${sym} lỗi\n`;
     }
+
+    // progress
+    if(i%10===0){
+      log.textContent += `-- ${i}/${symbols.length} --\n`;
+    }
+
+    await new Promise(r=>setTimeout(r,120)); // chống ban
   }
 
-  log.textContent += "\nDone.";
+  log.textContent += `\n🔥 DONE | Found: ${found}`;
 }
 
 </script>
